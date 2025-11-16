@@ -3,16 +3,17 @@ from datetime import datetime
 import json
 import os
 import tarfile
+import time
 
-
-from crawling.logging import setup_logger
+from utils.logging import setup_logger, close_logger
 
 MAX_ID = 200
 
 
 
 def arxiv_scrapper(id_list, log_file):
-    logger = setup_logger(log_file)
+    error_logger = setup_logger(f'{log_file}_error.log')
+    info_logger = setup_logger(f'{log_file}_paper_size.log')
 
     client = arxiv.Client()
 
@@ -26,8 +27,14 @@ def arxiv_scrapper(id_list, log_file):
             get_metadata(paper, papers)
 
 
-        get_full_text_source(paper, logger)
+        get_full_text_source(paper, error_logger, info_logger)
         previous_paper_id = paper_id
+
+    close_logger(error_logger)
+    close_logger(info_logger)
+    with open('logs/total_papers.log', 'a', encoding='utf-8') as f:
+        f.write(f"{len(papers)}\n")
+        f.close()
     return
 
 
@@ -37,7 +44,6 @@ def get_papers(client, id_list):
 
     chunks = [id_list[i:i + MAX_ID] for i in range(0, len(id_list), MAX_ID)]
     for chunk in chunks:
-        print(f"Processing chunk with {len(chunk)} IDs, from {chunk[0]} to {chunk[-1]}")
         search = arxiv.Search(
             id_list=chunk,
             sort_by=arxiv.SortCriterion.Relevance
@@ -52,10 +58,8 @@ def get_papers(client, id_list):
                     p_id = paper.entry_id.split('arxiv.org/abs/')[-1].split('v')[0]
                     additional_id.append(f"{p_id}v{i}")
     
-    print()
     chunks = [additional_id[i:i + MAX_ID] for i in range(0, len(additional_id), MAX_ID)]
     for chunk in chunks:
-        print(f"Processing additional chunk with {len(chunk)} IDs, from {chunk[0]} to {chunk[-1]}")
         search = arxiv.Search(
             id_list=chunk,
             sort_by=arxiv.SortCriterion.Relevance
@@ -64,8 +68,6 @@ def get_papers(client, id_list):
         papers.extend(result_papers)
     
     papers.sort(key=lambda x: x.entry_id)
-    for paper in papers:
-        print(paper.entry_id)
     return papers
 
 
@@ -98,22 +100,26 @@ def get_metadata(paper, all_papers):
         f.close()
 
 
-def get_full_text_source(paper, logger):
+def get_full_text_source(paper, error_logger, info_logger):
     paper_id = paper.entry_id.split("arxiv.org/abs/")[-1].split('v')[0]
-    save_path = 'data/' + paper_id.replace('.', '-') + '/tex'
+    #save_path = 'data/' + paper_id.replace('.', '-') + '/tex'
+    save_path = os.path.join('data', paper_id.replace('.', '-'), 'tex')
     os.makedirs(save_path, exist_ok=True)
 
     paper_version_folder_path = paper.entry_id.split("arxiv.org/abs/")[-1].replace('.', '-')
 
-    tar_path = paper.download_source(dirpath=save_path)
 
-    destination_path = os.path.join(save_path, paper_version_folder_path)
-    os.makedirs(destination_path, exist_ok=True)
-
+    tar_path = None
     try: 
+        tar_path = paper.download_source(dirpath=save_path)
+        destination_path = os.path.join(save_path, paper_version_folder_path)
+        os.makedirs(destination_path, exist_ok=True)
+
         with tarfile.open(tar_path, "r:gz") as tar:
             tar.extractall(path=destination_path)
 
+            # Get paper size in MB
+            paper_size_mb = get_folder_size_mb(destination_path)
             # Delete non tex files and non bib files
             for root, _, files in os.walk(destination_path):
                 for file in files:
@@ -126,7 +132,22 @@ def get_full_text_source(paper, logger):
                     else: 
                         if not file.endswith('.tex') and not file.endswith('.bib'):
                             os.remove(file_path)
+            paper_size_mb_after_remove = get_folder_size_mb(destination_path)
+            info_logger.info(f"Paper {paper.entry_id.split('arxiv.org/abs/')[-1]} (before/after remove pdf): {paper_size_mb:.2f} MB / {paper_size_mb_after_remove:.2f} MB")
         os.remove(tar_path)
     except Exception as e:
-        logger.error(f"{paper.entry_id.split('arxiv.org/abs/')[-1]}: {e}")
-        os.remove(tar_path)
+        error_logger.error(f"{paper.entry_id.split('arxiv.org/abs/')[-1]}: {e}")
+
+        if tar_path and os.path.exists(tar_path):
+            os.remove(tar_path)
+
+
+def get_folder_size_mb(folder):
+    if not os.path.exists(folder):
+        return 0
+    total = 0
+    for root, dirs, files in os.walk(folder):
+        for f in files:
+            fp = os.path.join(root, f)
+            total += os.path.getsize(fp)
+    return total / (1024 * 1024)

@@ -3,12 +3,12 @@ import os
 import requests
 import time
 
-from crawling.logging import setup_logger
+from utils.logging import setup_logger, close_logger
 
 def semantic_scholar_scrapper(id_list, max_retries, time_interval, log_file):
-    logger = setup_logger(log_file)
+    error_logger = setup_logger(f'{log_file}_error.log')
+    info_logger = setup_logger(f'{log_file}_references.log')
     req = requests.Session()
-
 
 
     for paper_id in id_list:
@@ -25,9 +25,8 @@ def semantic_scholar_scrapper(id_list, max_retries, time_interval, log_file):
                 time.sleep(time_interval)
                 break
             
-            print(f'{paper_id}: attemp {attempt + 1}')
             if attempt + 1 == max_retries: 
-                logger.error(f"{paper_id}")
+                error_logger.error(f"{paper_id}")
             time.sleep(time_interval)
 
         reference_data = data.get('references', [])
@@ -65,3 +64,8 @@ def semantic_scholar_scrapper(id_list, max_retries, time_interval, log_file):
         with open(f'{folder_path}/references.json', 'w', encoding='utf-8') as f:
             f.write(json_object)
             f.close()
+
+        info_logger.info(f"{paper_id}: {len(reference)} references")
+
+    close_logger(error_logger)
+    close_logger(info_logger)

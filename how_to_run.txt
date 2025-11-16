@@ -1,4 +1,0 @@
-1. Chỉnh start_id, end_id theo Minh nhờ
-2. Chạy run.sh
-3. Zip cả folder này lại, rename là '<start_id>_<end_id>.zip', gửi lên drive cứu Minh:
-https://drive.google.com/drive/folders/1knPeR29Z9xgLdJ9PN-ZB3YLr4TJ4nz2X?usp=sharing
